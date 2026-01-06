@@ -1855,603 +1855,603 @@ if show_analysis and df_stock is not None and not df_stock.empty:
         "👁️ Visual Analysis"
     ])
 
-        # ======================================
-        # TAB 1: Main Dashboard
-        # ======================================
-        with tab1:
-            # Top Stats Row
-            current_price = df_stock['Close'].iloc[-1]
-            price_change = df_stock['Close'].iloc[-1] - df_stock['Close'].iloc[-2]
-            pct_change = (price_change / df_stock['Close'].iloc[-2]) * 100
+    # ======================================
+    # TAB 1: Main Dashboard
+    # ======================================
+    with tab1:
+        # Top Stats Row
+        current_price = df_stock['Close'].iloc[-1]
+        price_change = df_stock['Close'].iloc[-1] - df_stock['Close'].iloc[-2]
+        pct_change = (price_change / df_stock['Close'].iloc[-2]) * 100
+        
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Current Price", f"₹{current_price:,.2f}", f"{pct_change:.2f}%")
+        m2.metric("Market Cap", f"{fundamentals.get('MarketCap', 'N/A')}") # Need to parse safety
+        m3.metric("P/E Ratio", f"{fundamentals.get('Forward P/E', 'N/A')}")
+        m4.metric("Volume", f"{df_stock['Volume'].iloc[-1]:,}")
+
+        # Main Chart
+        st.subheader(f"Price Action: {selected_stock}")
+        if chart_type == "Candlestick":
+            st.plotly_chart(create_candlestick_chart(df_stock), use_container_width=True)
+        else:
+            st.line_chart(df_stock["Close"])
             
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Current Price", f"₹{current_price:,.2f}", f"{pct_change:.2f}%")
-            m2.metric("Market Cap", f"{fundamentals.get('MarketCap', 'N/A')}") # Need to parse safety
-            m3.metric("P/E Ratio", f"{fundamentals.get('Forward P/E', 'N/A')}")
-            m4.metric("Volume", f"{df_stock['Volume'].iloc[-1]:,}")
-
-            # Main Chart
-            st.subheader(f"Price Action: {selected_stock}")
-            if chart_type == "Candlestick":
-                st.plotly_chart(create_candlestick_chart(df_stock), use_container_width=True)
-            else:
-                st.line_chart(df_stock["Close"])
+        # Sentiment Summary
+        filtered_news = filter_relevant_news(news_articles, selected_stock)
+        daily_sentiment = {}
+        if filtered_news:
+            st.info(f"Analyzed {len(filtered_news)} recent news articles for sentiment integration.")
+            for article in filtered_news:
+                text = f"{article.get('title','')} {article.get('description','')}".strip()
+                sentiment, score = analyze_sentiment(text)
+                date = article.get("publishedAt", "")[0:10]
                 
-            # Sentiment Summary
-            filtered_news = filter_relevant_news(news_articles, selected_stock)
-            daily_sentiment = {}
-            if filtered_news:
-                st.info(f"Analyzed {len(filtered_news)} recent news articles for sentiment integration.")
-                for article in filtered_news:
-                    text = f"{article.get('title','')} {article.get('description','')}".strip()
-                    sentiment, score = analyze_sentiment(text)
-                    date = article.get("publishedAt", "")[0:10]
-                    
-                    if date in daily_sentiment:
-                        daily_sentiment[date].append((sentiment, score))
-                    else:
-                        daily_sentiment[date] = [(sentiment, score)]
-            else:
-                st.warning("No specific news found. Using technicals only.")
-
-            # Run Hybrid Model
-            st.subheader("🤖 AI Price Forecast")
-            with st.spinner("Running Hybrid AI Models (Sequential Train/Test)..."):
-                st.header("📊 Hybrid AI Model Analysis (Professional Validation)")
-                
-                # Train hybrid model - NOW WITH COMPREHENSIVE METRICS
-                df_proc, results_df, models, scaler, features, metrics = create_hybrid_model(df_stock, daily_sentiment if daily_sentiment else {})
-                
-                # Display Model Performance Metrics
-                st.subheader("Strict Walk-Forward Validation Results")
-                
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.metric("Test RMSE (Lower is Better)", f"{metrics['rmse']:.4f}")
-                with c2:
-                    st.metric("Directional Accuracy", f"{metrics['accuracy']:.2f}%")
-                    
-                st.caption("Note: These metrics are calculated on strict out-of-sample data. They rely on predicting returns, not prices, making them a true test of market prediction ability.")
-                
-                # Display Scatter Plot of Predicted vs Actual Returns (True Validation)
-                st.subheader("Predicted vs Actual Returns")
-                
-                fig_val = go.Figure()
-                fig_val.add_trace(go.Scatter(x=results_df.index, y=results_df['Actual_Return'], name='Actual Returns', mode='lines', line=dict(color='blue', width=1)))
-                fig_val.add_trace(go.Scatter(x=results_df.index, y=results_df['Predicted_Return'], name='Predicted Returns', mode='lines', line=dict(color='orange', width=1)))
-                st.plotly_chart(fig_val, use_container_width=True)
-
-                # Store results in session state for other tabs
-                st.session_state['results_df'] = results_df
-                st.session_state['metrics'] = metrics
-                st.session_state['df_proc'] = df_proc
-                st.session_state['models'] = models
-                st.session_state['scaler'] = scaler
-                st.session_state['features'] = features
-                
-                # Forecast (using recursive returns)
-                current_price = df_stock['Close'].iloc[-1]
-                future_prices = hybrid_predict_prices(
-                    models, scaler, df_proc.iloc[-60:], features, 
-                    days=forecast_days, 
-                    weights={'xgb_weight': 0.5, 'gru_weight': 0.5}
-                )
-                st.session_state['future_prices'] = future_prices
-                
-                # =============================================
-                # ENHANCED AI ANALYSIS WITH GEMINI
-                # =============================================
-                st.markdown("---")
-                st.header("🤖 AI Expert Analysis")
-                
-                # Prepare technical indicators for Gemini
-                technical_indicators = {
-                    'RSI': df_proc['RSI_Norm'].iloc[-1] * 100 if 'RSI_Norm' in df_proc.columns else 50,
-                    'Volatility_5D': df_proc['Volatility_5D'].iloc[-1] if 'Volatility_5D' in df_proc.columns else 0,
-                    'Volatility_20D': df_proc['Volatility_20D'].iloc[-1] if 'Volatility_20D' in df_proc.columns else 0,
-                    'Price_vs_MA20': df_proc['MA_Div'].iloc[-1] if 'MA_Div' in df_proc.columns else 0,
-                    'MACD_Histogram': df_proc['MACD_Histogram'].iloc[-1] if 'MACD_Histogram' in df_proc.columns else 0
-                }
-                
-                # Generate Gemini Analysis
-                with st.spinner("🧠 Generating AI Expert Analysis..."):
-                    gemini_result = generate_gemini_analysis(
-                        stock_symbol=selected_stock,
-                        current_price=current_price,
-                        predicted_prices=future_prices,
-                        metrics=metrics,
-                        fundamentals=fundamentals,
-                        sentiment_summary=daily_sentiment,
-                        technical_indicators=technical_indicators,
-                        volatility_data=df_proc['Volatility_5D'].iloc[-1] if 'Volatility_5D' in df_proc.columns else 0
-                    )
-                    # Check if we got Gemini response or fallback
-                    gemini_analysis = gemini_result
-                    gemini_used = "template mode" not in gemini_result.lower() and "Analysis generated using template" not in gemini_result
-                
-                # Display Analysis in Premium Card
-                forecast_return = ((future_prices['Predicted Price'].iloc[-1] - current_price) / current_price) * 100 if not future_prices.empty else 0
-                
-                # Determine color scheme based on prediction
-                if forecast_return > 3:
-                    gradient_colors = "linear-gradient(135deg, #1a472a 0%, #2d5a3d 50%, #3d6b4f 100%)"
-                    border_color = "#00ff88"
-                    verdict_emoji = "🟢"
-                    verdict_text = "BULLISH"
-                elif forecast_return < -3:
-                    gradient_colors = "linear-gradient(135deg, #4a1a1a 0%, #5a2d2d 50%, #6b3d3d 100%)"
-                    border_color = "#ff4444"
-                    verdict_emoji = "🔴"
-                    verdict_text = "BEARISH"
+                if date in daily_sentiment:
+                    daily_sentiment[date].append((sentiment, score))
                 else:
-                    gradient_colors = "linear-gradient(135deg, #3a3a1a 0%, #4a4a2d 50%, #5a5a3d 100%)"
-                    border_color = "#ffaa00"
-                    verdict_emoji = "🟡"
-                    verdict_text = "NEUTRAL"
-                
-                # Top Quick Verdict Card
-                st.markdown(f"""
-                <div style="
-                    background: {gradient_colors};
-                    padding: 25px;
-                    border-radius: 15px;
-                    border: 2px solid {border_color};
-                    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-                    margin-bottom: 20px;
-                ">
-                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
-                        <div>
-                            <span style="font-size: 40px;">{verdict_emoji}</span>
-                            <span style="font-size: 28px; font-weight: bold; color: white; margin-left: 10px;">{selected_stock}</span>
-                            <span style="font-size: 18px; color: #aaa; margin-left: 10px;">Quick Verdict</span>
-                        </div>
-                        <div style="text-align: right;">
-                            <div style="font-size: 32px; font-weight: bold; color: {border_color};">{verdict_text}</div>
-                            <div style="font-size: 16px; color: #ccc;">Forecast: {forecast_return:+.2f}% | Accuracy: {metrics['accuracy']:.1f}%</div>
-                        </div>
-                    </div>
-                    <hr style="border: 1px solid {border_color}33; margin: 15px 0;">
-                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; text-align: center;">
-                        <div>
-                            <div style="font-size: 12px; color: #888;">Current Price</div>
-                            <div style="font-size: 18px; font-weight: bold; color: white;">₹{current_price:,.2f}</div>
-                        </div>
-                        <div>
-                            <div style="font-size: 12px; color: #888;">{forecast_days}-Day Target</div>
-                            <div style="font-size: 18px; font-weight: bold; color: {border_color};">₹{future_prices['Predicted Price'].iloc[-1]:,.2f}</div>
-                        </div>
-                        <div>
-                            <div style="font-size: 12px; color: #888;">Model Confidence</div>
-                            <div style="font-size: 18px; font-weight: bold; color: white;">{"High" if metrics['accuracy'] > 60 else "Medium" if metrics['accuracy'] > 52 else "Low"}</div>
-                        </div>
-                        <div>
-                            <div style="font-size: 12px; color: #888;">Volatility</div>
-                            <div style="font-size: 18px; font-weight: bold; color: white;">{df_proc['Volatility_5D'].iloc[-1]*100:.1f}%</div>
-                        </div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                # Gemini Detailed Analysis Card
-                analysis_mode = "✨ Powered by Gemini AI" if gemini_used else "📝 Template Analysis"
-                st.markdown(f"""
-                <div style="
-                    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-                    padding: 25px;
-                    border-radius: 15px;
-                    border: 1px solid #0f3460;
-                    box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-                ">
-                    <h3 style="color: #e94560; margin-bottom: 15px;">🧠 AI Expert Analysis <span style="font-size: 14px; color: {'#00ff88' if gemini_used else '#ffaa00'};">({analysis_mode})</span></h3>
-                    <div style="color: #eee; line-height: 1.8;">
-                        {gemini_analysis.replace(chr(10), '<br>')}
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-                
-                st.markdown("---")
-                
-                # Forecast Plot
-                st.subheader("📈 Price Forecast Visualization")
-                fig_forecast = go.Figure()
-                fig_forecast.add_trace(go.Scatter(
-                    x=df_stock.index[-60:], 
-                    y=df_stock['Close'][-60:], 
-                    name="Historical",
-                    line=dict(color='#00d4ff', width=2)
-                ))
-                fig_forecast.add_trace(go.Scatter(
-                    x=future_prices.index, 
-                    y=future_prices['Predicted Price'], 
-                    name="AI Forecast", 
-                    line=dict(dash='dot', color='#ff6b6b', width=2)
-                ))
-                fig_forecast.update_layout(
-                    template="plotly_dark",
-                    title=f"{selected_stock} - {forecast_days} Day Price Forecast",
-                    xaxis_title="Date",
-                    yaxis_title="Price (₹)",
-                    hovermode='x unified'
-                )
-                st.plotly_chart(fig_forecast, use_container_width=True)
-                
-                with st.expander("📊 View Detailed Forecast Table"):
-                    st.dataframe(future_prices.style.format("{:.2f}"))
+                    daily_sentiment[date] = [(sentiment, score)]
+        else:
+            st.warning("No specific news found. Using technicals only.")
 
-        # ======================================
-        # TAB 2: Dynamic Fusion
-        # ======================================
-        with tab2:
-            st.header("🔬 Dynamic Fusion Framework")
+        # Run Hybrid Model
+        st.subheader("🤖 AI Price Forecast")
+        with st.spinner("Running Hybrid AI Models (Sequential Train/Test)..."):
+            st.header("📊 Hybrid AI Model Analysis (Professional Validation)")
             
-            # Premium description card
-            st.markdown("""
-            <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 20px; border-radius: 15px; margin-bottom: 20px;">
-                <h4 style="color: #e94560;">Bayesian Multi-Expert System</h4>
-                <p style="color: #eee;">This advanced system dynamically combines three specialized AI models:</p>
-                <ul style="color: #aaa;">
-                    <li><strong style="color: #00d4ff;">Technical Expert</strong> - GRU neural network analyzing price patterns</li>
-                    <li><strong style="color: #00ff88;">Sentiment Expert</strong> - FinBERT transformer analyzing news</li>
-                    <li><strong style="color: #ff6b6b;">Volatility Expert</strong> - MLP analyzing India VIX & market fear</li>
-                </ul>
-                <p style="color: #888; font-size: 12px;">Weights are adjusted using Bayesian uncertainty: w = exp(-σ²) / Σ exp(-σ²)</p>
-            </div>
-            """, unsafe_allow_html=True)
+            # Train hybrid model - NOW WITH COMPREHENSIVE METRICS
+            df_proc, results_df, models, scaler, features, metrics = create_hybrid_model(df_stock, daily_sentiment if daily_sentiment else {})
             
-            if enable_dynamic_fusion:
-                vix_data = get_india_vix_data(start_date, end_date)
-                fusion_framework = DynamicFusionFramework()
-                
-                # Format sentiment
-                fmt_sentiment = {k: [(s, c) for s, c in v] for k, v in daily_sentiment.items()}
-                
-                with st.spinner("🧠 Training Expert Models (this may take a moment)..."):
-                    try:
-                        fusion_framework.train_models(df_stock, fmt_sentiment, vix_data)
-                        
-                        # Predict recent
-                        recent_preds = []
-                        
-                        # Simulation loop for last 15 days
-                        sim_range = df_stock.index[-15:]
-                        
-                        for date in sim_range:
-                            try:
-                                curr_idx = df_stock.index.get_loc(date)
-                                if curr_idx < 30:
-                                    continue  # Need minimum data
-                                stock_slice = df_stock.iloc[:curr_idx]
-                                
-                                res = fusion_framework.predict(stock_slice, fmt_sentiment, vix_data)
-                                recent_preds.append({
-                                    'Date': date,
-                                    'Actual': df_stock.loc[date, 'Close'],
-                                    'Fusion': res['combined_prediction'],
-                                    'Tech_W': res['weights']['technical'],
-                                    'Sent_W': res['weights']['sentiment'],
-                                    'Vol_W': res['weights']['volatility']
-                                })
-                            except Exception as e:
-                                continue
-                        
-                        if recent_preds:
-                            res_df = pd.DataFrame(recent_preds).set_index('Date')
-                            
-                            # Current Weights Display
-                            st.subheader("📊 Current Expert Weights")
-                            latest_weights = recent_preds[-1]
-                            
-                            w1, w2, w3 = st.columns(3)
-                            w1.metric("Technical 📈", f"{latest_weights['Tech_W']*100:.1f}%", 
-                                     help="Weight assigned to price pattern analysis")
-                            w2.metric("Sentiment 📰", f"{latest_weights['Sent_W']*100:.1f}%",
-                                     help="Weight assigned to news sentiment")
-                            w3.metric("Volatility ⚡", f"{latest_weights['Vol_W']*100:.1f}%",
-                                     help="Weight assigned to VIX/fear analysis")
-                            
-                            st.markdown("---")
-                            
-                            # Weights Chart
-                            st.subheader("📈 Weight Evolution (Last 15 Days)")
-                            fig_w = go.Figure()
-                            fig_w.add_trace(go.Scatter(
-                                x=res_df.index, y=res_df['Tech_W'], 
-                                name='Technical', stackgroup='one',
-                                line=dict(color='#00d4ff')
-                            ))
-                            fig_w.add_trace(go.Scatter(
-                                x=res_df.index, y=res_df['Sent_W'], 
-                                name='Sentiment', stackgroup='one',
-                                line=dict(color='#00ff88')
-                            ))
-                            fig_w.add_trace(go.Scatter(
-                                x=res_df.index, y=res_df['Vol_W'], 
-                                name='Volatility', stackgroup='one',
-                                line=dict(color='#ff6b6b')
-                            ))
-                            fig_w.update_layout(
-                                template="plotly_dark",
-                                title="Dynamic Expert Influence Over Time",
-                                yaxis_title="Weight",
-                                yaxis=dict(tickformat='.0%'),
-                                hovermode='x unified'
-                            )
-                            st.plotly_chart(fig_w, use_container_width=True)
-                            
-                            # Interpretation
-                            dominant = max(['Technical', 'Sentiment', 'Volatility'], 
-                                          key=lambda x: latest_weights[f"{x[:4] if x != 'Volatility' else 'Vol'}_W"])
-                            st.info(f"💡 **Insight:** The {dominant} expert currently has the highest influence, suggesting the model finds {dominant.lower()} signals most reliable for this stock right now.")
-                        else:
-                            st.warning("⚠️ Could not generate predictions. Insufficient data for dynamic fusion analysis.")
-                    except Exception as e:
-                        st.error(f"❌ Dynamic Fusion training failed: {str(e)}")
-                        st.info("This can happen with limited data or if the stock has unusual trading patterns. Try selecting a different date range or stock.")
-            else:
-                st.info("👆 Enable 'Dynamic Fusion Framework' in the sidebar to use this feature.")
-
-        # ======================================
-        # TAB 3: Technicals & Risk
-        # ======================================
-        with tab3:
-            st.header("Risk Management & Technicals")
+            # Display Model Performance Metrics
+            st.subheader("Strict Walk-Forward Validation Results")
             
             c1, c2 = st.columns(2)
             with c1:
-                st.subheader("Key Levels (Fibonacci)")
-                fibs = RiskManager.calculate_fibonacci_levels(df_stock)
-                fib_df = pd.DataFrame.from_dict(fibs, orient='index', columns=['Price'])
-                st.table(fib_df.style.format("₹{:.2f}"))
-                
+                st.metric("Test RMSE (Lower is Better)", f"{metrics['rmse']:.4f}")
             with c2:
-                st.subheader("Risk Metrics")
-                atr = RiskManager.calculate_atr(df_stock)
-                st.metric("ATR (Volatility)", f"₹{atr:.2f}")
+                st.metric("Directional Accuracy", f"{metrics['accuracy']:.2f}%")
                 
-                # Trade Setup Calculator
-                st.markdown("### 🛡️ Trade Setup Calculator")
-                
-                # Get latest prediction direction
-                pred_price = future_prices['Predicted Price'].iloc[-1] if not future_prices.empty else current_price
-                
-                setup = RiskManager.get_trade_setup(current_price, pred_price, atr, metrics['accuracy']/100)
-                
-                st.write(f"**Action:** {setup['Direction']}")
-                st.write(f"**Entry:** ₹{setup['Entry']:.2f}")
-                st.write(f"**Stop Loss:** ₹{setup['Stop Loss']:.2f} ({(setup['Stop Loss']-current_price)/current_price*100:.2f}%)")
-                st.write(f"**Target:** ₹{setup['Target']:.2f} ({(setup['Target']-current_price)/current_price*100:.2f}%)")
-                st.metric("Risk/Reward Ratio", f"1:{setup['Risk/Reward']:.2f}")
+            st.caption("Note: These metrics are calculated on strict out-of-sample data. They rely on predicting returns, not prices, making them a true test of market prediction ability.")
+            
+            # Display Scatter Plot of Predicted vs Actual Returns (True Validation)
+            st.subheader("Predicted vs Actual Returns")
+            
+            fig_val = go.Figure()
+            fig_val.add_trace(go.Scatter(x=results_df.index, y=results_df['Actual_Return'], name='Actual Returns', mode='lines', line=dict(color='blue', width=1)))
+            fig_val.add_trace(go.Scatter(x=results_df.index, y=results_df['Predicted_Return'], name='Predicted Returns', mode='lines', line=dict(color='orange', width=1)))
+            st.plotly_chart(fig_val, use_container_width=True)
 
-        # ======================================
-        # TAB 4: Fundamentals
-        # ======================================
-        with tab4:
-            st.header("Fundamental Health")
+            # Store results in session state for other tabs
+            st.session_state['results_df'] = results_df
+            st.session_state['metrics'] = metrics
+            st.session_state['df_proc'] = df_proc
+            st.session_state['models'] = models
+            st.session_state['scaler'] = scaler
+            st.session_state['features'] = features
             
-            f_cols = ["Forward P/E", "PEG Ratio", "Price/Book", "Debt/Equity", "ROE", "Profit Margins"]
+            # Forecast (using recursive returns)
+            current_price = df_stock['Close'].iloc[-1]
+            future_prices = hybrid_predict_prices(
+                models, scaler, df_proc.iloc[-60:], features, 
+                days=forecast_days, 
+                weights={'xgb_weight': 0.5, 'gru_weight': 0.5}
+            )
+            st.session_state['future_prices'] = future_prices
             
-            # create nice grid
-            fc1, fc2, fc3 = st.columns(3)
-            for i, key in enumerate(f_cols):
-                val = fundamentals.get(key)
-                if pd.isna(val): val = "N/A"
-                elif isinstance(val, (int, float)): val = f"{val:.2f}"
-                
-                if i % 3 == 0: fc1.metric(key, val)
-                elif i % 3 == 1: fc2.metric(key, val)
-                else: fc3.metric(key, val)
-                
-            st.caption("Data source: Yahoo Finance")
-
-        # ======================================
-        # TAB 5: Backtesting
-        # ======================================
-        with tab5:
-            st.header("🛠️ Strategy Backtest")
-            st.write("Simulating trading strategy based on Hybrid Model signals over the selected period.")
+            # =============================================
+            # ENHANCED AI ANALYSIS WITH GEMINI
+            # =============================================
+            st.markdown("---")
+            st.header("🤖 AI Expert Analysis")
             
-            # Access results from session state
-            if 'results_df' in st.session_state and st.session_state['results_df'] is not None:
-                backtest_data = st.session_state['results_df'].copy()
-                
-                if 'Predicted_Return' in backtest_data.columns and len(backtest_data) > 0:
-                    # Auto-run backtest
-                    with st.spinner("Running backtest simulation..."):
-                        # Signal: 1 if Predicted Return > 0 (Positive), -1 if < 0
-                        backtest_data['Signal'] = np.where(backtest_data['Predicted_Return'] > 0.001, 1, 0)
-                        backtest_data['Signal'] = np.where(backtest_data['Predicted_Return'] < -0.001, -1, backtest_data['Signal'])
-                        
-                        # Run vector backtest
-                        bt = VectorizedBacktester(backtest_data, backtest_data['Signal'])
-                        res = bt.run_backtest()
-                        
-                        # Display Metrics in Premium Cards
-                        st.markdown("""
-                        <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 20px; border-radius: 15px; margin-bottom: 20px;">
-                            <h3 style="color: #e94560; margin-bottom: 15px;">📊 Backtest Performance Summary</h3>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                        b1, b2, b3, b4 = st.columns(4)
-                        
-                        # Color code based on performance
-                        ret_color = "normal" if res['Total Return'] > 0 else "inverse"
-                        sr_color = "normal" if res['Sharpe Ratio'] > 1 else "off" if res['Sharpe Ratio'] > 0 else "inverse"
-                        
-                        b1.metric("Total Return", f"{res['Total Return']*100:.2f}%", delta=f"{res['Total Return']*100:.1f}%")
-                        b2.metric("Sharpe Ratio", f"{res['Sharpe Ratio']:.2f}", help="Above 1 is good, above 2 is excellent")
-                        b3.metric("Max Drawdown", f"{res['Max Drawdown']*100:.2f}%", delta=f"{res['Max Drawdown']*100:.1f}%", delta_color="inverse")
-                        b4.metric("Win Rate", f"{res['Win Rate']*100:.1f}%", help="Percentage of profitable trades")
-                        
-                        st.markdown("---")
-                        
-                        # Equity Curve with Plotly
-                        st.subheader("📈 Equity Curve")
-                        fig_equity = go.Figure()
-                        fig_equity.add_trace(go.Scatter(
-                            x=res['Equity Curve'].index,
-                            y=res['Equity Curve'].values,
-                            name="Portfolio Value",
-                            fill='tozeroy',
-                            fillcolor='rgba(0, 212, 255, 0.2)',
-                            line=dict(color='#00d4ff', width=2)
-                        ))
-                        fig_equity.update_layout(
-                            template="plotly_dark",
-                            title="Strategy Equity Curve (₹100,000 Initial Capital)",
-                            xaxis_title="Date",
-                            yaxis_title="Portfolio Value (₹)",
-                            hovermode='x unified'
-                        )
-                        st.plotly_chart(fig_equity, use_container_width=True)
-                        
-                        # Trading Signals Table
-                        with st.expander("📋 View Trading Signals & Returns"):
-                            display_df = backtest_data[['Actual_Return', 'Predicted_Return', 'Signal']].copy()
-                            display_df['Signal_Label'] = display_df['Signal'].map({1: '🟢 LONG', 0: '⚪ HOLD', -1: '🔴 SHORT'})
-                            st.dataframe(display_df.tail(50).style.format({
-                                'Actual_Return': '{:.4f}',
-                                'Predicted_Return': '{:.4f}'
-                            }))
-                else:
-                    st.warning("⚠️ Insufficient prediction data for backtesting. Please run analysis on a stock with more historical data.")
+            # Prepare technical indicators for Gemini
+            technical_indicators = {
+                'RSI': df_proc['RSI_Norm'].iloc[-1] * 100 if 'RSI_Norm' in df_proc.columns else 50,
+                'Volatility_5D': df_proc['Volatility_5D'].iloc[-1] if 'Volatility_5D' in df_proc.columns else 0,
+                'Volatility_20D': df_proc['Volatility_20D'].iloc[-1] if 'Volatility_20D' in df_proc.columns else 0,
+                'Price_vs_MA20': df_proc['MA_Div'].iloc[-1] if 'MA_Div' in df_proc.columns else 0,
+                'MACD_Histogram': df_proc['MACD_Histogram'].iloc[-1] if 'MACD_Histogram' in df_proc.columns else 0
+            }
+            
+            # Generate Gemini Analysis
+            with st.spinner("🧠 Generating AI Expert Analysis..."):
+                gemini_result = generate_gemini_analysis(
+                    stock_symbol=selected_stock,
+                    current_price=current_price,
+                    predicted_prices=future_prices,
+                    metrics=metrics,
+                    fundamentals=fundamentals,
+                    sentiment_summary=daily_sentiment,
+                    technical_indicators=technical_indicators,
+                    volatility_data=df_proc['Volatility_5D'].iloc[-1] if 'Volatility_5D' in df_proc.columns else 0
+                )
+                # Check if we got Gemini response or fallback
+                gemini_analysis = gemini_result
+                gemini_used = "template mode" not in gemini_result.lower() and "Analysis generated using template" not in gemini_result
+            
+            # Display Analysis in Premium Card
+            forecast_return = ((future_prices['Predicted Price'].iloc[-1] - current_price) / current_price) * 100 if not future_prices.empty else 0
+            
+            # Determine color scheme based on prediction
+            if forecast_return > 3:
+                gradient_colors = "linear-gradient(135deg, #1a472a 0%, #2d5a3d 50%, #3d6b4f 100%)"
+                border_color = "#00ff88"
+                verdict_emoji = "🟢"
+                verdict_text = "BULLISH"
+            elif forecast_return < -3:
+                gradient_colors = "linear-gradient(135deg, #4a1a1a 0%, #5a2d2d 50%, #6b3d3d 100%)"
+                border_color = "#ff4444"
+                verdict_emoji = "🔴"
+                verdict_text = "BEARISH"
             else:
-                st.info("👈 Please run stock analysis from the Dashboard tab first to generate backtest data.")
-                st.markdown("""
-                ### How Backtesting Works:
-                1. The AI model generates predictions for each historical day
-                2. Based on predicted returns, signals are generated (BUY/SELL/HOLD)
-                3. Performance is calculated assuming trades are executed at next day's close
-                4. Metrics like Sharpe Ratio and Max Drawdown help evaluate strategy quality
-                """)
-
-        # ======================================
-        # TAB 6: Visual Analysis
-        # ======================================
-        with tab6:
-            st.header("👁️ AI Visual Pattern Analysis")
+                gradient_colors = "linear-gradient(135deg, #3a3a1a 0%, #4a4a2d 50%, #5a5a3d 100%)"
+                border_color = "#ffaa00"
+                verdict_emoji = "🟡"
+                verdict_text = "NEUTRAL"
             
-            # Premium description card
-            st.markdown("""
-            <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 20px; border-radius: 15px; margin-bottom: 20px;">
-                <h4 style="color: #e94560;">🧠 Computer Vision for Charts</h4>
-                <p style="color: #eee;">This module uses YOLOv8 (You Only Look Once) neural networks trained on stock charts to detect:</p>
-                <ul style="color: #aaa;">
-                    <li>Classic patterns: Head & Shoulders, Double Top/Bottom, Triangles</li>
-                    <li>Support & Resistance zones</li>
-                    <li>Trend direction signals</li>
-                </ul>
+            # Top Quick Verdict Card
+            st.markdown(f"""
+            <div style="
+                background: {gradient_colors};
+                padding: 25px;
+                border-radius: 15px;
+                border: 2px solid {border_color};
+                box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+                margin-bottom: 20px;
+            ">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap;">
+                    <div>
+                        <span style="font-size: 40px;">{verdict_emoji}</span>
+                        <span style="font-size: 28px; font-weight: bold; color: white; margin-left: 10px;">{selected_stock}</span>
+                        <span style="font-size: 18px; color: #aaa; margin-left: 10px;">Quick Verdict</span>
+                    </div>
+                    <div style="text-align: right;">
+                        <div style="font-size: 32px; font-weight: bold; color: {border_color};">{verdict_text}</div>
+                        <div style="font-size: 16px; color: #ccc;">Forecast: {forecast_return:+.2f}% | Accuracy: {metrics['accuracy']:.1f}%</div>
+                    </div>
+                </div>
+                <hr style="border: 1px solid {border_color}33; margin: 15px 0;">
+                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; text-align: center;">
+                    <div>
+                        <div style="font-size: 12px; color: #888;">Current Price</div>
+                        <div style="font-size: 18px; font-weight: bold; color: white;">₹{current_price:,.2f}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #888;">{forecast_days}-Day Target</div>
+                        <div style="font-size: 18px; font-weight: bold; color: {border_color};">₹{future_prices['Predicted Price'].iloc[-1]:,.2f}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #888;">Model Confidence</div>
+                        <div style="font-size: 18px; font-weight: bold; color: white;">{"High" if metrics['accuracy'] > 60 else "Medium" if metrics['accuracy'] > 52 else "Low"}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 12px; color: #888;">Volatility</div>
+                        <div style="font-size: 18px; font-weight: bold; color: white;">{df_proc['Volatility_5D'].iloc[-1]*100:.1f}%</div>
+                    </div>
+                </div>
             </div>
             """, unsafe_allow_html=True)
             
-            if not VISUAL_AI_AVAILABLE:
-                st.error("⚠️ Visual AI libraries not installed.")
-                st.markdown("""
-                ### Installation Required:
-                To enable Visual Pattern Analysis, install the following:
-                ```bash
-                pip install ultralytics opencv-python
-                ```
-                
-                **Note:** This feature uses pre-trained YOLO models from Hugging Face:
-                - `foduucom/stockmarket-pattern-detection-yolov8`
-                - `foduucom/stockmarket-future-prediction`
-                """)
-            else:
-                col_v1, col_v2 = st.columns([3, 1])
-                
-                with col_v1:
-                    st.subheader("📸 Chart Analysis")
+            # Gemini Detailed Analysis Card
+            analysis_mode = "✨ Powered by Gemini AI" if gemini_used else "📝 Template Analysis"
+            st.markdown(f"""
+            <div style="
+                background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+                padding: 25px;
+                border-radius: 15px;
+                border: 1px solid #0f3460;
+                box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            ">
+                <h3 style="color: #e94560; margin-bottom: 15px;">🧠 AI Expert Analysis <span style="font-size: 14px; color: {'#00ff88' if gemini_used else '#ffaa00'};">({analysis_mode})</span></h3>
+                <div style="color: #eee; line-height: 1.8;">
+                    {gemini_analysis.replace(chr(10), '<br>')}
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown("---")
+            
+            # Forecast Plot
+            st.subheader("📈 Price Forecast Visualization")
+            fig_forecast = go.Figure()
+            fig_forecast.add_trace(go.Scatter(
+                x=df_stock.index[-60:], 
+                y=df_stock['Close'][-60:], 
+                name="Historical",
+                line=dict(color='#00d4ff', width=2)
+            ))
+            fig_forecast.add_trace(go.Scatter(
+                x=future_prices.index, 
+                y=future_prices['Predicted Price'], 
+                name="AI Forecast", 
+                line=dict(dash='dot', color='#ff6b6b', width=2)
+            ))
+            fig_forecast.update_layout(
+                template="plotly_dark",
+                title=f"{selected_stock} - {forecast_days} Day Price Forecast",
+                xaxis_title="Date",
+                yaxis_title="Price (₹)",
+                hovermode='x unified'
+            )
+            st.plotly_chart(fig_forecast, use_container_width=True)
+            
+            with st.expander("📊 View Detailed Forecast Table"):
+                st.dataframe(future_prices.style.format("{:.2f}"))
+
+    # ======================================
+    # TAB 2: Dynamic Fusion
+    # ======================================
+    with tab2:
+        st.header("🔬 Dynamic Fusion Framework")
+        
+        # Premium description card
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+            <h4 style="color: #e94560;">Bayesian Multi-Expert System</h4>
+            <p style="color: #eee;">This advanced system dynamically combines three specialized AI models:</p>
+            <ul style="color: #aaa;">
+                <li><strong style="color: #00d4ff;">Technical Expert</strong> - GRU neural network analyzing price patterns</li>
+                <li><strong style="color: #00ff88;">Sentiment Expert</strong> - FinBERT transformer analyzing news</li>
+                <li><strong style="color: #ff6b6b;">Volatility Expert</strong> - MLP analyzing India VIX & market fear</li>
+            </ul>
+            <p style="color: #888; font-size: 12px;">Weights are adjusted using Bayesian uncertainty: w = exp(-σ²) / Σ exp(-σ²)</p>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if enable_dynamic_fusion:
+            vix_data = get_india_vix_data(start_date, end_date)
+            fusion_framework = DynamicFusionFramework()
+            
+            # Format sentiment
+            fmt_sentiment = {k: [(s, c) for s, c in v] for k, v in daily_sentiment.items()}
+            
+            with st.spinner("🧠 Training Expert Models (this may take a moment)..."):
+                try:
+                    fusion_framework.train_models(df_stock, fmt_sentiment, vix_data)
                     
-                    # Show preview chart before running inference
-                    st.markdown("**Current Price Action (Last 50 Days)**")
-                    preview_data = df_stock.tail(50)
-                    fig_preview = go.Figure(data=[go.Candlestick(
-                        x=preview_data.index,
-                        open=preview_data['Open'],
-                        high=preview_data['High'],
-                        low=preview_data['Low'],
-                        close=preview_data['Close'],
-                        name='Price'
-                    )])
-                    fig_preview.update_layout(
-                        template="plotly_dark",
-                        height=300,
-                        margin=dict(l=0, r=0, t=30, b=0),
-                        xaxis_rangeslider_visible=False,
-                        title="Click button below to detect patterns using AI"
-                    )
-                    st.plotly_chart(fig_preview, use_container_width=True)
+                    # Predict recent
+                    recent_preds = []
                     
-                    # Use a unique key for the button to prevent rerun issues
-                    if st.button("🔍 Run Visual Inference", type="primary", use_container_width=True, key="visual_inference_btn"):
-                        st.session_state['run_visual_inference'] = True
+                    # Simulation loop for last 15 days
+                    sim_range = df_stock.index[-15:]
                     
-                    # Run inference if requested
-                    if st.session_state.get('run_visual_inference', False):
-                        with st.spinner("Generating Chart & Running Neural Networks..."):
-                            try:
-                                analyst = VisualPatternAnalyst()
-                                img, results, bias = analyst.analyze_patterns(df_stock)
-                                
-                                if img is not None:
-                                    st.session_state['visual_image'] = img
-                                    st.session_state['visual_bias'] = bias
-                                    st.session_state['visual_results'] = results
-                                    st.session_state['visual_error'] = None
-                                else:
-                                    st.session_state['visual_error'] = bias
-                                    st.session_state['visual_image'] = None
-                            except Exception as e:
-                                st.session_state['visual_error'] = str(e)
-                                st.session_state['visual_image'] = None
+                    for date in sim_range:
+                        try:
+                            curr_idx = df_stock.index.get_loc(date)
+                            if curr_idx < 30:
+                                continue  # Need minimum data
+                            stock_slice = df_stock.iloc[:curr_idx]
                             
-                            st.session_state['run_visual_inference'] = False
-                            st.rerun()
+                            res = fusion_framework.predict(stock_slice, fmt_sentiment, vix_data)
+                            recent_preds.append({
+                                'Date': date,
+                                'Actual': df_stock.loc[date, 'Close'],
+                                'Fusion': res['combined_prediction'],
+                                'Tech_W': res['weights']['technical'],
+                                'Sent_W': res['weights']['sentiment'],
+                                'Vol_W': res['weights']['volatility']
+                            })
+                        except Exception as e:
+                            continue
                     
-                    # Display results from session state
-                    if st.session_state.get('visual_image') is not None:
-                        st.image(st.session_state['visual_image'], caption="AI Annotated Chart (Detected Patterns)", use_column_width=True)
+                    if recent_preds:
+                        res_df = pd.DataFrame(recent_preds).set_index('Date')
                         
-                        if st.session_state.get('visual_results'):
-                            st.subheader("🎯 Detected Patterns")
-                            results_df_visual = pd.DataFrame(st.session_state['visual_results'])
-                            st.dataframe(results_df_visual)
-                    
-                    if st.session_state.get('visual_error'):
-                        st.error(f"Analysis failed: {st.session_state['visual_error']}")
-                        st.info("""
-                        **Troubleshooting:**
-                        - The YOLO models need to be downloaded from HuggingFace
-                        - This may fail due to network issues or firewall
-                        - Try running: `pip install huggingface_hub` and restart the app
-                        """)
-                    
-                    # Show conclusion if available
-                    if 'visual_bias' in st.session_state and st.session_state['visual_bias']:
-                        bias_color = "#00ff88" if st.session_state['visual_bias'] == "Bullish" else "#ff4444" if st.session_state['visual_bias'] == "Bearish" else "#ffaa00"
-                        st.markdown(f"""
-                        <div style="background: linear-gradient(135deg, #1a2e1a 0%, #2d3e2d 100%); padding: 15px; border-radius: 10px; border-left: 4px solid {bias_color};">
-                            <h4 style="color: {bias_color};">Visual AI Conclusion: {st.session_state['visual_bias']}</h4>
-                        </div>
-                        """, unsafe_allow_html=True)
+                        # Current Weights Display
+                        st.subheader("📊 Current Expert Weights")
+                        latest_weights = recent_preds[-1]
                         
-                with col_v2:
-                    st.subheader("📊 Pattern Guide")
+                        w1, w2, w3 = st.columns(3)
+                        w1.metric("Technical 📈", f"{latest_weights['Tech_W']*100:.1f}%", 
+                                 help="Weight assigned to price pattern analysis")
+                        w2.metric("Sentiment 📰", f"{latest_weights['Sent_W']*100:.1f}%",
+                                 help="Weight assigned to news sentiment")
+                        w3.metric("Volatility ⚡", f"{latest_weights['Vol_W']*100:.1f}%",
+                                 help="Weight assigned to VIX/fear analysis")
+                        
+                        st.markdown("---")
+                        
+                        # Weights Chart
+                        st.subheader("📈 Weight Evolution (Last 15 Days)")
+                        fig_w = go.Figure()
+                        fig_w.add_trace(go.Scatter(
+                            x=res_df.index, y=res_df['Tech_W'], 
+                            name='Technical', stackgroup='one',
+                            line=dict(color='#00d4ff')
+                        ))
+                        fig_w.add_trace(go.Scatter(
+                            x=res_df.index, y=res_df['Sent_W'], 
+                            name='Sentiment', stackgroup='one',
+                            line=dict(color='#00ff88')
+                        ))
+                        fig_w.add_trace(go.Scatter(
+                            x=res_df.index, y=res_df['Vol_W'], 
+                            name='Volatility', stackgroup='one',
+                            line=dict(color='#ff6b6b')
+                        ))
+                        fig_w.update_layout(
+                            template="plotly_dark",
+                            title="Dynamic Expert Influence Over Time",
+                            yaxis_title="Weight",
+                            yaxis=dict(tickformat='.0%'),
+                            hovermode='x unified'
+                        )
+                        st.plotly_chart(fig_w, use_container_width=True)
+                        
+                        # Interpretation
+                        dominant = max(['Technical', 'Sentiment', 'Volatility'], 
+                                      key=lambda x: latest_weights[f"{x[:4] if x != 'Volatility' else 'Vol'}_W"])
+                        st.info(f"💡 **Insight:** The {dominant} expert currently has the highest influence, suggesting the model finds {dominant.lower()} signals most reliable for this stock right now.")
+                    else:
+                        st.warning("⚠️ Could not generate predictions. Insufficient data for dynamic fusion analysis.")
+                except Exception as e:
+                    st.error(f"❌ Dynamic Fusion training failed: {str(e)}")
+                    st.info("This can happen with limited data or if the stock has unusual trading patterns. Try selecting a different date range or stock.")
+        else:
+            st.info("👆 Enable 'Dynamic Fusion Framework' in the sidebar to use this feature.")
+
+    # ======================================
+    # TAB 3: Technicals & Risk
+    # ======================================
+    with tab3:
+        st.header("Risk Management & Technicals")
+        
+        c1, c2 = st.columns(2)
+        with c1:
+            st.subheader("Key Levels (Fibonacci)")
+            fibs = RiskManager.calculate_fibonacci_levels(df_stock)
+            fib_df = pd.DataFrame.from_dict(fibs, orient='index', columns=['Price'])
+            st.table(fib_df.style.format("₹{:.2f}"))
+            
+        with c2:
+            st.subheader("Risk Metrics")
+            atr = RiskManager.calculate_atr(df_stock)
+            st.metric("ATR (Volatility)", f"₹{atr:.2f}")
+            
+            # Trade Setup Calculator
+            st.markdown("### 🛡️ Trade Setup Calculator")
+            
+            # Get latest prediction direction
+            pred_price = future_prices['Predicted Price'].iloc[-1] if not future_prices.empty else current_price
+            
+            setup = RiskManager.get_trade_setup(current_price, pred_price, atr, metrics['accuracy']/100)
+            
+            st.write(f"**Action:** {setup['Direction']}")
+            st.write(f"**Entry:** ₹{setup['Entry']:.2f}")
+            st.write(f"**Stop Loss:** ₹{setup['Stop Loss']:.2f} ({(setup['Stop Loss']-current_price)/current_price*100:.2f}%)")
+            st.write(f"**Target:** ₹{setup['Target']:.2f} ({(setup['Target']-current_price)/current_price*100:.2f}%)")
+            st.metric("Risk/Reward Ratio", f"1:{setup['Risk/Reward']:.2f}")
+
+    # ======================================
+    # TAB 4: Fundamentals
+    # ======================================
+    with tab4:
+        st.header("Fundamental Health")
+        
+        f_cols = ["Forward P/E", "PEG Ratio", "Price/Book", "Debt/Equity", "ROE", "Profit Margins"]
+        
+        # create nice grid
+        fc1, fc2, fc3 = st.columns(3)
+        for i, key in enumerate(f_cols):
+            val = fundamentals.get(key)
+            if pd.isna(val): val = "N/A"
+            elif isinstance(val, (int, float)): val = f"{val:.2f}"
+            
+            if i % 3 == 0: fc1.metric(key, val)
+            elif i % 3 == 1: fc2.metric(key, val)
+            else: fc3.metric(key, val)
+            
+        st.caption("Data source: Yahoo Finance")
+
+    # ======================================
+    # TAB 5: Backtesting
+    # ======================================
+    with tab5:
+        st.header("🛠️ Strategy Backtest")
+        st.write("Simulating trading strategy based on Hybrid Model signals over the selected period.")
+        
+        # Access results from session state
+        if 'results_df' in st.session_state and st.session_state['results_df'] is not None:
+            backtest_data = st.session_state['results_df'].copy()
+            
+            if 'Predicted_Return' in backtest_data.columns and len(backtest_data) > 0:
+                # Auto-run backtest
+                with st.spinner("Running backtest simulation..."):
+                    # Signal: 1 if Predicted Return > 0 (Positive), -1 if < 0
+                    backtest_data['Signal'] = np.where(backtest_data['Predicted_Return'] > 0.001, 1, 0)
+                    backtest_data['Signal'] = np.where(backtest_data['Predicted_Return'] < -0.001, -1, backtest_data['Signal'])
+                    
+                    # Run vector backtest
+                    bt = VectorizedBacktester(backtest_data, backtest_data['Signal'])
+                    res = bt.run_backtest()
+                    
+                    # Display Metrics in Premium Cards
                     st.markdown("""
-                    **Bullish Patterns:**
-                    - 🟢 Double Bottom
-                    - 🟢 Inverse H&S
-                    - 🟢 Ascending Triangle
+                    <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+                        <h3 style="color: #e94560; margin-bottom: 15px;">📊 Backtest Performance Summary</h3>
+                    </div>
+                    """, unsafe_allow_html=True)
                     
-                    **Bearish Patterns:**
-                    - 🔴 Double Top
-                    - 🔴 Head & Shoulders
-                    - 🔴 Descending Triangle
+                    b1, b2, b3, b4 = st.columns(4)
                     
-                    **Neutral:**
-                    - 🟡 Symmetrical Triangle
-                    - 🟡 Rectangle
+                    # Color code based on performance
+                    ret_color = "normal" if res['Total Return'] > 0 else "inverse"
+                    sr_color = "normal" if res['Sharpe Ratio'] > 1 else "off" if res['Sharpe Ratio'] > 0 else "inverse"
+                    
+                    b1.metric("Total Return", f"{res['Total Return']*100:.2f}%", delta=f"{res['Total Return']*100:.1f}%")
+                    b2.metric("Sharpe Ratio", f"{res['Sharpe Ratio']:.2f}", help="Above 1 is good, above 2 is excellent")
+                    b3.metric("Max Drawdown", f"{res['Max Drawdown']*100:.2f}%", delta=f"{res['Max Drawdown']*100:.1f}%", delta_color="inverse")
+                    b4.metric("Win Rate", f"{res['Win Rate']*100:.1f}%", help="Percentage of profitable trades")
+                    
+                    st.markdown("---")
+                    
+                    # Equity Curve with Plotly
+                    st.subheader("📈 Equity Curve")
+                    fig_equity = go.Figure()
+                    fig_equity.add_trace(go.Scatter(
+                        x=res['Equity Curve'].index,
+                        y=res['Equity Curve'].values,
+                        name="Portfolio Value",
+                        fill='tozeroy',
+                        fillcolor='rgba(0, 212, 255, 0.2)',
+                        line=dict(color='#00d4ff', width=2)
+                    ))
+                    fig_equity.update_layout(
+                        template="plotly_dark",
+                        title="Strategy Equity Curve (₹100,000 Initial Capital)",
+                        xaxis_title="Date",
+                        yaxis_title="Portfolio Value (₹)",
+                        hovermode='x unified'
+                    )
+                    st.plotly_chart(fig_equity, use_container_width=True)
+                    
+                    # Trading Signals Table
+                    with st.expander("📋 View Trading Signals & Returns"):
+                        display_df = backtest_data[['Actual_Return', 'Predicted_Return', 'Signal']].copy()
+                        display_df['Signal_Label'] = display_df['Signal'].map({1: '🟢 LONG', 0: '⚪ HOLD', -1: '🔴 SHORT'})
+                        st.dataframe(display_df.tail(50).style.format({
+                            'Actual_Return': '{:.4f}',
+                            'Predicted_Return': '{:.4f}'
+                        }))
+            else:
+                st.warning("⚠️ Insufficient prediction data for backtesting. Please run analysis on a stock with more historical data.")
+        else:
+            st.info("👈 Please run stock analysis from the Dashboard tab first to generate backtest data.")
+            st.markdown("""
+            ### How Backtesting Works:
+            1. The AI model generates predictions for each historical day
+            2. Based on predicted returns, signals are generated (BUY/SELL/HOLD)
+            3. Performance is calculated assuming trades are executed at next day's close
+            4. Metrics like Sharpe Ratio and Max Drawdown help evaluate strategy quality
+            """)
+
+    # ======================================
+    # TAB 6: Visual Analysis
+    # ======================================
+    with tab6:
+        st.header("👁️ AI Visual Pattern Analysis")
+        
+        # Premium description card
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); padding: 20px; border-radius: 15px; margin-bottom: 20px;">
+            <h4 style="color: #e94560;">🧠 Computer Vision for Charts</h4>
+            <p style="color: #eee;">This module uses YOLOv8 (You Only Look Once) neural networks trained on stock charts to detect:</p>
+            <ul style="color: #aaa;">
+                <li>Classic patterns: Head & Shoulders, Double Top/Bottom, Triangles</li>
+                <li>Support & Resistance zones</li>
+                <li>Trend direction signals</li>
+            </ul>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        if not VISUAL_AI_AVAILABLE:
+            st.error("⚠️ Visual AI libraries not installed.")
+            st.markdown("""
+            ### Installation Required:
+            To enable Visual Pattern Analysis, install the following:
+            ```bash
+            pip install ultralytics opencv-python
+            ```
+            
+            **Note:** This feature uses pre-trained YOLO models from Hugging Face:
+            - `foduucom/stockmarket-pattern-detection-yolov8`
+            - `foduucom/stockmarket-future-prediction`
+            """)
+        else:
+            col_v1, col_v2 = st.columns([3, 1])
+            
+            with col_v1:
+                st.subheader("📸 Chart Analysis")
+                
+                # Show preview chart before running inference
+                st.markdown("**Current Price Action (Last 50 Days)**")
+                preview_data = df_stock.tail(50)
+                fig_preview = go.Figure(data=[go.Candlestick(
+                    x=preview_data.index,
+                    open=preview_data['Open'],
+                    high=preview_data['High'],
+                    low=preview_data['Low'],
+                    close=preview_data['Close'],
+                    name='Price'
+                )])
+                fig_preview.update_layout(
+                    template="plotly_dark",
+                    height=300,
+                    margin=dict(l=0, r=0, t=30, b=0),
+                    xaxis_rangeslider_visible=False,
+                    title="Click button below to detect patterns using AI"
+                )
+                st.plotly_chart(fig_preview, use_container_width=True)
+                
+                # Use a unique key for the button to prevent rerun issues
+                if st.button("🔍 Run Visual Inference", type="primary", use_container_width=True, key="visual_inference_btn"):
+                    st.session_state['run_visual_inference'] = True
+                
+                # Run inference if requested
+                if st.session_state.get('run_visual_inference', False):
+                    with st.spinner("Generating Chart & Running Neural Networks..."):
+                        try:
+                            analyst = VisualPatternAnalyst()
+                            img, results, bias = analyst.analyze_patterns(df_stock)
+                            
+                            if img is not None:
+                                st.session_state['visual_image'] = img
+                                st.session_state['visual_bias'] = bias
+                                st.session_state['visual_results'] = results
+                                st.session_state['visual_error'] = None
+                            else:
+                                st.session_state['visual_error'] = bias
+                                st.session_state['visual_image'] = None
+                        except Exception as e:
+                            st.session_state['visual_error'] = str(e)
+                            st.session_state['visual_image'] = None
+                        
+                        st.session_state['run_visual_inference'] = False
+                        st.rerun()
+                
+                # Display results from session state
+                if st.session_state.get('visual_image') is not None:
+                    st.image(st.session_state['visual_image'], caption="AI Annotated Chart (Detected Patterns)", use_column_width=True)
+                    
+                    if st.session_state.get('visual_results'):
+                        st.subheader("🎯 Detected Patterns")
+                        results_df_visual = pd.DataFrame(st.session_state['visual_results'])
+                        st.dataframe(results_df_visual)
+                
+                if st.session_state.get('visual_error'):
+                    st.error(f"Analysis failed: {st.session_state['visual_error']}")
+                    st.info("""
+                    **Troubleshooting:**
+                    - The YOLO models need to be downloaded from HuggingFace
+                    - This may fail due to network issues or firewall
+                    - Try running: `pip install huggingface_hub` and restart the app
                     """)
-    else:
-        st.error("❌ No data found for this stock. Please check the ticker symbol or try a different date range.")
+                
+                # Show conclusion if available
+                if 'visual_bias' in st.session_state and st.session_state['visual_bias']:
+                    bias_color = "#00ff88" if st.session_state['visual_bias'] == "Bullish" else "#ff4444" if st.session_state['visual_bias'] == "Bearish" else "#ffaa00"
+                    st.markdown(f"""
+                    <div style="background: linear-gradient(135deg, #1a2e1a 0%, #2d3e2d 100%); padding: 15px; border-radius: 10px; border-left: 4px solid {bias_color};">
+                        <h4 style="color: {bias_color};">Visual AI Conclusion: {st.session_state['visual_bias']}</h4>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    
+            with col_v2:
+                st.subheader("📊 Pattern Guide")
+                st.markdown("""
+                **Bullish Patterns:**
+                - 🟢 Double Bottom
+                - 🟢 Inverse H&S
+                - 🟢 Ascending Triangle
+                
+                **Bearish Patterns:**
+                - 🔴 Double Top
+                - 🔴 Head & Shoulders
+                - 🔴 Descending Triangle
+                
+                **Neutral:**
+                - 🟡 Symmetrical Triangle
+                - 🟡 Rectangle
+            """)
+else:
+    st.error("❌ No data found for this stock. Please check the ticker symbol or try a different date range.")
