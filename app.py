@@ -56,7 +56,7 @@ selected_stock = st.sidebar.selectbox("Select Stock", indian_stocks)
 
 col1, col2 = st.sidebar.columns(2)
 with col1:
-    start_date = st.date_input("Start", datetime.date(2023, 1, 1))
+    start_date = st.date_input("Start", datetime.date(2020, 1, 1))  # 5 years for better accuracy
 with col2:
     end_date = st.date_input("End", datetime.date.today())
 
@@ -112,7 +112,7 @@ if st.sidebar.button("Launch Analysis", type="primary"):
         st.session_state['vix_data'] = vix_data
         progress_bar.progress(80)
         
-        # Step 6: Multi-Source Sentiment (95%)
+        # Step 6: Multi-Source Sentiment (90%)
         status_text.text("🧠 Analyzing multi-source sentiment...")
         try:
             from data.multi_sentiment import analyze_stock_sentiment
@@ -120,9 +120,21 @@ if st.sidebar.button("Launch Analysis", type="primary"):
             st.session_state['multi_sentiment'] = multi_sentiment
         except Exception:
             st.session_state['multi_sentiment'] = None
+        progress_bar.progress(90)
+
+        # Step 7: Pattern Detection (95%)
+        status_text.text("📐 Detecting chart patterns...")
+        try:
+            from models.visual_analyst import PatternAnalyst
+            analyst = PatternAnalyst(order=5)
+            pattern_analysis = analyst.analyze_all_patterns(df_stock)
+            st.session_state['pattern_analysis'] = pattern_analysis
+        except Exception:
+            st.session_state['pattern_analysis'] = None
         progress_bar.progress(95)
         
         # Final: Store everything (100%)
+
         status_text.text("✅ Finalizing analysis...")
         st.session_state['df_stock'] = df_stock
         st.session_state['fundamentals'] = fundamentals
@@ -324,7 +336,10 @@ if show_analysis and df_stock is not None and not df_stock.empty:
                     fundamentals=fundamentals,
                     sentiment_summary=daily_sentiment,
                     technical_indicators=technical_indicators,
-                    volatility_data=df_proc['Volatility_5D'].iloc[-1] if 'Volatility_5D' in df_proc.columns else 0
+                    volatility_data=df_proc['Volatility_5D'].iloc[-1] if 'Volatility_5D' in df_proc.columns else 0,
+                    fii_dii_data=st.session_state.get('fii_dii_data'),
+                    vix_data=st.session_state.get('vix_data'),
+                    patterns=st.session_state.get('pattern_analysis', {}).get('patterns') if st.session_state.get('pattern_analysis') else None
                 )
                 gemini_used = "template mode" not in gemini_analysis.lower()
             
@@ -359,16 +374,10 @@ if show_analysis and df_stock is not None and not df_stock.empty:
             </div>
             """, unsafe_allow_html=True)
             
-            # Detailed Analysis
+            # Detailed Analysis - Use proper Streamlit markdown rendering
             analysis_mode = "✨ Powered by Gemini AI" if gemini_used else "📝 Template Analysis"
-            st.markdown(f"""
-            <div style="background: {UIConfig.GRADIENT_DARK}; padding: 25px; border-radius: 15px; border: 1px solid #0f3460;">
-                <h3 style="color: #e94560;">🧠 AI Expert Analysis <span style="font-size: 14px; color: {'#00ff88' if gemini_used else '#ffaa00'};">({analysis_mode})</span></h3>
-                <div style="color: #eee; line-height: 1.8;">
-                    {gemini_analysis.replace(chr(10), '<br>')}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"### 🧠 AI Expert Analysis <span style='font-size: 14px; color: {'#00ff88' if gemini_used else '#ffaa00'};'>({analysis_mode})</span>", unsafe_allow_html=True)
+            st.markdown(gemini_analysis)
             
             st.markdown("---")
             
@@ -655,7 +664,12 @@ if show_analysis and df_stock is not None and not df_stock.empty:
                     st.metric("Articles", newsapi_data.get('count', 0))
                     st.metric("Sentiment", f"{newsapi_score:+.3f}", delta="Positive" if newsapi_score > 0 else "Negative" if newsapi_score < 0 else "Neutral")
                 else:
-                    st.info("Add NEWS_API_KEY to .env")
+                    # Check if key exists but no articles returned
+                    from config.settings import NEWS_API_KEY
+                    if NEWS_API_KEY:
+                        st.info("No NewsAPI articles found")
+                    else:
+                        st.info("Add NEWS_API_KEY to .env")
             
             with s3:
                 st.markdown("**💬 Reddit (25%)**")
@@ -764,8 +778,13 @@ if show_analysis and df_stock is not None and not df_stock.empty:
         
         from models.visual_analyst import PatternAnalyst
         
-        analyst = PatternAnalyst(order=5)
-        analysis = analyst.analyze_all_patterns(df_stock)
+        # Use pre-calculated analysis from loading step
+        analysis = st.session_state.get('pattern_analysis')
+        
+        if not analysis:
+            # Fallback if not in session state
+            analyst = PatternAnalyst(order=5)
+            analysis = analyst.analyze_all_patterns(df_stock)
         
         # Overall Bias
         bias = analysis['overall_bias']

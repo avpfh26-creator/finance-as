@@ -41,7 +41,8 @@ def initialize_gemini():
 def generate_gemini_analysis(stock_symbol: str, current_price: float, 
                              predicted_prices, metrics: dict, fundamentals: dict,
                              sentiment_summary: dict, technical_indicators: dict,
-                             volatility_data, fusion_weights: dict = None) -> str:
+                             volatility_data, fusion_weights: dict = None,
+                             fii_dii_data=None, vix_data=None, patterns: list = None) -> str:
     """
     Generate comprehensive AI analysis using Google Gemini.
     
@@ -55,6 +56,9 @@ def generate_gemini_analysis(stock_symbol: str, current_price: float,
         technical_indicators: Dictionary with technical indicators
         volatility_data: Volatility value
         fusion_weights: Dynamic fusion model weights (optional)
+        fii_dii_data: DataFrame with FII/DII data (optional)
+        vix_data: DataFrame/Float with VIX data (optional)
+        patterns: List of detected chart patterns (optional)
     
     Returns:
         Markdown-formatted analysis string
@@ -89,6 +93,31 @@ def generate_gemini_analysis(stock_symbol: str, current_price: float,
             else:
                 sentiment_text = f"Mixed ({positive_count} positive, {negative_count} negative)"
     
+    # Prepare FII/DII text
+    fii_dii_text = "Data Unavailable"
+    if fii_dii_data is not None and not fii_dii_data.empty:
+        last_row = fii_dii_data.iloc[-1]
+        fii_net = last_row.get('FII_Net', 0) / 1e7  # Convert to Cr
+        dii_net = last_row.get('DII_Net', 0) / 1e7
+        fii_dii_text = f"FII Net: ₹{fii_net:+.2f}Cr | DII Net: ₹{dii_net:+.2f}Cr (Latest Session)"
+    
+    # Prepare VIX text
+    vix_text = "Data Unavailable"
+    if vix_data is not None:
+        try:
+            val = float(vix_data.iloc[-1]['Close']) if hasattr(vix_data, 'iloc') else float(vix_data)
+            vix_text = f"{val:.2f}"
+            if val > 20: vix_text += " (High Volatility)"
+            elif val < 12: vix_text += " (Low Volatility)"
+            else: vix_text += " (Normal)"
+        except: pass
+
+    # Prepare Patterns text
+    patterns_text = "No specific classic patterns detected."
+    if patterns:
+        p_list = [f"{p.get('Pattern')} ({p.get('Type')}, Conf: {p.get('Confidence')}%)" for p in patterns[:3]]
+        patterns_text = ", ".join(p_list)
+    
     # Fusion weights summary
     fusion_text = "Not available"
     if fusion_weights:
@@ -96,74 +125,52 @@ def generate_gemini_analysis(stock_symbol: str, current_price: float,
                       f"Sentiment: {fusion_weights.get('sentiment', 0)*100:.1f}%, " \
                       f"Volatility: {fusion_weights.get('volatility', 0)*100:.1f}%"
     
-    # Expert prompt
-    prompt = f"""
-# EXPERT STOCK ANALYSIS REQUEST
+    # Expert prompt - optimized for clean markdown output
+    prompt = f"""You are a senior quantitative strategist. Analyze {stock_symbol} and provide a concise, professional analysis.
 
-You are a senior quantitative analyst at a top-tier investment bank with 20+ years of experience in Indian equity markets. Provide a comprehensive, actionable analysis for a sophisticated retail investor.
+**MARKET DATA:**
+- Stock: {stock_symbol} @ ₹{current_price:,.2f}
+- India VIX: {vix_text}
+- Institutional Flows: {fii_dii_text}
 
-## STOCK DATA: {stock_symbol} (NSE)
+**AI MODEL FORECAST ({forecast_days} days):**
+- Target: ₹{price_forecast_end:,.2f} ({forecast_return:+.2f}%)
+- Accuracy: {metrics.get('accuracy', 0):.1f}% | RMSE: {metrics.get('rmse', 0):.4f}
 
-### Current Market Data:
-- **Current Price:** ₹{current_price:,.2f}
-- **Today's Change:** Included in price action
+**TECHNICALS:**
+- Patterns: {patterns_text}
+- RSI: {technical_indicators.get('RSI', 'N/A')} | MACD: {technical_indicators.get('MACD_Histogram', 'N/A')}
+- Volatility: {technical_indicators.get('Volatility_20D', 0)*100:.2f}%
 
-### AI Model Predictions:
-- **{forecast_days}-Day Price Forecast:** ₹{price_forecast_end:,.2f}
-- **Predicted Return:** {forecast_return:+.2f}%
-- **Model Directional Accuracy:** {metrics.get('accuracy', 0):.1f}% (on out-of-sample test data)
-- **Prediction RMSE:** {metrics.get('rmse', 0):.4f}
-
-### Technical Indicators:
-- **RSI (14):** {technical_indicators.get('RSI', 'N/A')}
-- **5-Day Volatility:** {technical_indicators.get('Volatility_5D', 0)*100:.2f}%
-- **20-Day Volatility:** {technical_indicators.get('Volatility_20D', 0)*100:.2f}%
-- **Price vs 20-MA:** {technical_indicators.get('Price_vs_MA20', 0)*100:+.2f}%
-- **MACD Histogram:** {technical_indicators.get('MACD_Histogram', 'N/A')}
-
-### Sentiment Analysis (FinBERT NLP):
-- **News Sentiment:** {sentiment_text}
-
-### Fundamental Data:
-- **Forward P/E:** {fundamentals.get('Forward P/E', 'N/A')}
-- **PEG Ratio:** {fundamentals.get('PEG Ratio', 'N/A')}
-- **ROE:** {fundamentals.get('ROE', 'N/A')}
-- **Debt/Equity:** {fundamentals.get('Debt/Equity', 'N/A')}
-
-### Dynamic Fusion Model Weights:
-{fusion_text}
+**SENTIMENT:** {sentiment_text}
+**VALUATION:** P/E {fundamentals.get('Forward P/E', 'N/A')} | PEG {fundamentals.get('PEG Ratio', 'N/A')}
 
 ---
 
-## REQUIRED OUTPUT FORMAT (Be concise, max 300 words total):
+**PROVIDE YOUR ANALYSIS IN THIS EXACT FORMAT:**
 
-### 🎯 VERDICT
-[One of: STRONG BUY 🟢 | BUY 🟢 | HOLD 🟡 | SELL 🔴 | STRONG SELL 🔴]
+### 🎯 Verdict: [STRONG BUY / BUY / HOLD / SELL / STRONG SELL]
+**Confidence:** [High/Medium/Low]
 
-### 📊 OUTLOOK
-- **Short-term (1-5 days):** [Bullish/Bearish/Neutral + 1 sentence why]
-- **Medium-term (1-4 weeks):** [Bullish/Bearish/Neutral + 1 sentence why]
+### 📊 Key Points
+- **AI Signal:** [One sentence on what the model predicts]
+- **Technical Setup:** [One sentence on chart structure]
+- **Institutional Flow:** [One sentence on FII/DII implication]
 
-### 💡 KEY INSIGHT
-[Single most important factor driving this recommendation - 2 sentences max]
+### ⚠️ Risks
+- [Risk 1 in one sentence]
+- [Risk 2 in one sentence]
 
-### ⚠️ RISK FACTORS
-[2-3 bullet points of key risks to monitor]
+### 🎯 Trade Setup
+- **Entry:** ₹[price]
+- **Target:** ₹[price] ([X]% upside)
+- **Stop Loss:** ₹[price] ([X]% downside)
 
-### 📈 TRADE SETUP (if actionable)
-- **Entry Zone:** [Price range or "Wait for..."]
-- **Stop Loss:** [Price level or % from entry]
-- **Target:** [Price level or % gain expected]
-
----
-
-**IMPORTANT GUIDELINES:**
-1. Be direct and actionable - avoid vague language
-2. If model accuracy is below 55%, explicitly note low confidence
-3. Weight technical signals more when sentiment is mixed
-4. Consider Indian market hours and global cues
-5. Never guarantee returns - use probabilistic language
-6. If data is insufficient, say so clearly
+**RULES:**
+1. Use bullet points, not paragraphs
+2. Be specific with numbers
+3. Maximum 5 sentences per section
+4. No disclaimers or caveats
 """
 
     try:

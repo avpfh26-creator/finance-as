@@ -73,17 +73,35 @@ def create_accuracy_comparison_chart(df_stock: pd.DataFrame,
             test_start_idx = df_stock.index.get_loc(results_df.index[0])
             start_price = df_stock['Close'].iloc[test_start_idx - 1]
             
-            # Convert returns to prices
-            actual_prices_test = [start_price]
-            predicted_prices_test = [start_price]
+            # FIX: Use actual prices as anchor points to prevent divergence
+            # Instead of cumulative predicted returns, apply predicted return to previous ACTUAL price
+            actual_prices_test = []
+            predicted_prices_test = []
             
             for i in range(len(results_df)):
-                actual_prices_test.append(actual_prices_test[-1] * np.exp(results_df['Actual_Return'].iloc[i]))
-                predicted_prices_test.append(predicted_prices_test[-1] * np.exp(results_df['Predicted_Return'].iloc[i]))
+                # Get actual price at this point
+                actual_price = df_stock['Close'].iloc[test_start_idx + i]
+                actual_prices_test.append(actual_price)
+                
+                # Apply predicted return to previous actual price (anchored approach)
+                if i == 0:
+                    prev_actual = start_price
+                else:
+                    prev_actual = df_stock['Close'].iloc[test_start_idx + i - 1]
+                
+                predicted_price = prev_actual * np.exp(results_df['Predicted_Return'].iloc[i])
+                predicted_prices_test.append(predicted_price)
             
-            # Remove first element (starting price)
-            actual_prices_test = actual_prices_test[1:]
-            predicted_prices_test = predicted_prices_test[1:]
+            # Validation: Check if predictions are within reasonable bounds (50% of actual)
+            if predicted_prices_test and actual_prices_test:
+                avg_actual = np.mean(actual_prices_test)
+                avg_predicted = np.mean(predicted_prices_test)
+                divergence = abs(avg_predicted - avg_actual) / avg_actual
+                
+                if divergence > 0.5:
+                    # If predictions diverge too much, log warning and use simpler approach
+                    import streamlit as st
+                    st.warning(f"⚠️ Prediction divergence detected ({divergence*100:.1f}%). Chart may be inaccurate.")
             
             # Plot predicted prices on test data
             fig.add_trace(go.Scatter(

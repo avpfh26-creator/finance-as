@@ -8,11 +8,25 @@ import pandas as pd
 import xgboost as xgb
 import tensorflow as tf
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import GRU, Dense, Dropout
+from tensorflow.keras.layers import GRU, LSTM, Dense, Dropout, Concatenate, Input
+from tensorflow.keras.models import Model
 from tensorflow.keras.optimizers import Adam
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics import mean_squared_error
 from pandas.tseries.offsets import CustomBusinessDay
+
+# Statistical models for ensemble
+try:
+    from statsmodels.tsa.arima.model import ARIMA
+    ARIMA_AVAILABLE = True
+except ImportError:
+    ARIMA_AVAILABLE = False
+
+try:
+    from prophet import Prophet
+    PROPHET_AVAILABLE = True
+except ImportError:
+    PROPHET_AVAILABLE = False
 
 from config.settings import ModelConfig
 from data.vix_data import IndiaHolidayCalendar
@@ -208,48 +222,125 @@ def create_hybrid_model(df: pd.DataFrame, sentiment_features: dict,
     xgb_pred = xgb_model.predict(X_test_scaled)
     
     # ==============================================
-    # GRU Model - Simpler Architecture (no sequence lookback)
+    # LSTM + GRU Combined Model (Parallel Architecture)
     # ==============================================
-    # Reshape for GRU: (samples, timesteps=1, features)
+    # Reshape for RNN: (samples, timesteps=1, features)
     X_train_3d = X_train_scaled.reshape((X_train_scaled.shape[0], 1, X_train_scaled.shape[1]))
     X_test_3d = X_test_scaled.reshape((X_test_scaled.shape[0], 1, X_test_scaled.shape[1]))
     
-    model_gru = Sequential([
-        GRU(64, input_shape=(1, len(features)), return_sequences=True),
-        Dropout(0.2),
-        GRU(32, return_sequences=False),
-        Dropout(0.2),
-        Dense(16, activation='relu'),
-        Dense(1)
-    ])
-    model_gru.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
-    model_gru.fit(X_train_3d, y_train, epochs=30, batch_size=32, verbose=0, shuffle=False)
+    # Build LSTM+GRU parallel model using Functional API
+    input_layer = Input(shape=(1, len(features)))
     
-    gru_pred = model_gru.predict(X_test_3d, verbose=0).flatten()
+    # LSTM Branch
+    lstm_branch = LSTM(64, return_sequences=True)(input_layer)
+    lstm_branch = Dropout(0.2)(lstm_branch)
+    lstm_branch = LSTM(32, return_sequences=False)(lstm_branch)
+    lstm_branch = Dropout(0.2)(lstm_branch)
+    
+    # GRU Branch  
+    gru_branch = GRU(64, return_sequences=True)(input_layer)
+    gru_branch = Dropout(0.2)(gru_branch)
+    gru_branch = GRU(32, return_sequences=False)(gru_branch)
+    gru_branch = Dropout(0.2)(gru_branch)
+    
+    # Merge branches
+    merged = Concatenate()([lstm_branch, gru_branch])
+    merged = Dense(32, activation='relu')(merged)
+    merged = Dropout(0.2)(merged)
+    merged = Dense(16, activation='relu')(merged)
+    output_layer = Dense(1)(merged)
+    
+    model_rnn = Model(inputs=input_layer, outputs=output_layer)
+    model_rnn.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
+    model_rnn.fit(X_train_3d, y_train, epochs=50, batch_size=32, verbose=0, shuffle=False)
+    
+    rnn_pred = model_rnn.predict(X_test_3d, verbose=0).flatten()
     
     # ==============================================
-    # Ensemble with Volatility-Aware Scaling
+    # ARIMA/Prophet Statistical Model Ensemble
+    # ==============================================
+    arima_pred = None
+    prophet_pred = None
+    
+    # ARIMA prediction (good for short-term patterns)
+    if ARIMA_AVAILABLE and len(y_train) > 30:
+        try:
+            # Use returns for ARIMA
+            arima_model = ARIMA(y_train, order=(2, 0, 2))
+            arima_fitted = arima_model.fit()
+            arima_pred = arima_fitted.forecast(steps=len(y_test))
+        except Exception:
+            arima_pred = None
+    
+    # Prophet prediction (good for trend + seasonality)
+    if PROPHET_AVAILABLE and len(y_train) > 30:
+        try:
+            # Prepare Prophet format
+            train_dates = df_proc.index[:train_size]
+            prophet_df = pd.DataFrame({
+                'ds': train_dates,
+                'y': y_train
+            })
+            
+            prophet_model = Prophet(
+                daily_seasonality=False,
+                weekly_seasonality=True,
+                yearly_seasonality=True,
+                changepoint_prior_scale=0.05
+            )
+            prophet_model.fit(prophet_df)
+            
+            # Make future dataframe
+            test_dates = df_proc.index[train_size:]
+            future_df = pd.DataFrame({'ds': test_dates})
+            prophet_forecast = prophet_model.predict(future_df)
+            prophet_pred = prophet_forecast['yhat'].values
+        except Exception:
+            prophet_pred = None
+    
+    # ==============================================
+    # Multi-Model Ensemble with Dynamic Weighting
     # ==============================================
     # Calculate individual RMSE for weighting
     xgb_rmse = np.sqrt(mean_squared_error(y_test, xgb_pred))
-    gru_rmse = np.sqrt(mean_squared_error(y_test, gru_pred))
+    rnn_rmse = np.sqrt(mean_squared_error(y_test, rnn_pred))
     
-    # For tabular financial data, XGBoost typically performs better
-    # Weight more heavily toward XGBoost (70/30 split as baseline, adjusted by performance)
-    base_xgb_weight = 0.7
-    base_gru_weight = 0.3
+    # Base weights for ML models
+    base_xgb_weight = 0.50  # XGBoost
+    base_rnn_weight = 0.30  # LSTM+GRU combined
+    base_stat_weight = 0.20  # Statistical models (ARIMA/Prophet)
     
-    # Adjust weights based on relative RMSE
-    if xgb_rmse < gru_rmse:
-        performance_boost = min((gru_rmse / (xgb_rmse + 1e-6)) - 1, 0.2)
-        xgb_weight = min(base_xgb_weight + performance_boost, 0.9)
-        gru_weight = 1 - xgb_weight
+    # Adjust ML weights based on performance
+    if xgb_rmse < rnn_rmse:
+        performance_boost = min((rnn_rmse / (xgb_rmse + 1e-6)) - 1, 0.15)
+        xgb_weight = min(base_xgb_weight + performance_boost, 0.65)
+        rnn_weight = base_rnn_weight - performance_boost/2
     else:
-        performance_boost = min((xgb_rmse / (gru_rmse + 1e-6)) - 1, 0.1)
-        gru_weight = min(base_gru_weight + performance_boost, 0.5)
-        xgb_weight = 1 - gru_weight
+        performance_boost = min((xgb_rmse / (rnn_rmse + 1e-6)) - 1, 0.15)
+        rnn_weight = min(base_rnn_weight + performance_boost, 0.45)
+        xgb_weight = base_xgb_weight - performance_boost/2
     
-    hybrid_pred = xgb_weight * xgb_pred + gru_weight * gru_pred
+    # Start with ML ensemble
+    hybrid_pred = xgb_weight * xgb_pred + rnn_weight * rnn_pred
+    remaining_weight = 1.0 - xgb_weight - rnn_weight
+    
+    # Add statistical model predictions
+    stat_preds = []
+    if arima_pred is not None:
+        stat_preds.append(arima_pred)
+    if prophet_pred is not None:
+        stat_preds.append(prophet_pred)
+    
+    if stat_preds:
+        # Average statistical predictions
+        stat_avg = np.mean(stat_preds, axis=0)
+        hybrid_pred = hybrid_pred + remaining_weight * stat_avg
+    else:
+        # Redistribute weight to ML models
+        total_ml = xgb_weight + rnn_weight
+        xgb_weight = xgb_weight / total_ml
+        rnn_weight = rnn_weight / total_ml
+        hybrid_pred = xgb_weight * xgb_pred + rnn_weight * rnn_pred
     
     # ==============================================
     # PRODUCTION SCALING - Match prediction variance to actual
@@ -284,20 +375,22 @@ def create_hybrid_model(df: pd.DataFrame, sentiment_features: dict,
     results_df = pd.DataFrame({
         'Actual_Return': y_test,
         'Predicted_Return': hybrid_pred,
-        'XGB_Return': xgb_pred * (actual_std / (np.std(xgb_pred) + 1e-8)),  # Also scale individual for display
-        'GRU_Return': gru_pred * (actual_std / (np.std(gru_pred) + 1e-8))
+        'XGB_Return': xgb_pred * (actual_std / (np.std(xgb_pred) + 1e-8)),
+        'RNN_Return': rnn_pred * (actual_std / (np.std(rnn_pred) + 1e-8))  # LSTM+GRU combined
     }, index=test_dates)
     
     metrics = {
         'rmse': rmse,
         'accuracy': accuracy,
         'xgb_weight': xgb_weight,
-        'gru_weight': gru_weight,
+        'rnn_weight': rnn_weight,  # LSTM+GRU combined
         'xgb_rmse': xgb_rmse,
-        'gru_rmse': gru_rmse
+        'rnn_rmse': rnn_rmse,
+        'arima_used': arima_pred is not None,
+        'prophet_used': prophet_pred is not None
     }
     
-    return df_proc, results_df, {'xgb': xgb_model, 'gru': model_gru}, scaler, features, metrics
+    return df_proc, results_df, {'xgb': xgb_model, 'rnn': model_rnn}, scaler, features, metrics
 
 
 def hybrid_predict_next_day(models: dict, scaler: MinMaxScaler, 
@@ -306,7 +399,7 @@ def hybrid_predict_next_day(models: dict, scaler: MinMaxScaler,
     Predict next day return using trained hybrid models.
     
     Args:
-        models: Dictionary with 'xgb' and 'gru' models
+        models: Dictionary with 'xgb' and 'rnn' (LSTM+GRU) models
         scaler: Fitted MinMaxScaler
         last_data_point: Series with feature values
         features: List of feature names
@@ -321,12 +414,12 @@ def hybrid_predict_next_day(models: dict, scaler: MinMaxScaler,
     # XGB prediction
     xgb_pred = models['xgb'].predict(x_scaled)[0]
     
-    # GRU prediction
+    # RNN (LSTM+GRU) prediction
     x_3d = x_scaled.reshape((1, 1, len(features)))
-    gru_pred = models['gru'].predict(x_3d, verbose=0)[0][0]
+    rnn_pred = models['rnn'].predict(x_3d, verbose=0)[0][0]
     
-    # Average
-    avg_return = (xgb_pred + gru_pred) / 2.0
+    # Weighted average (60/40 since we now have better RNN)
+    avg_return = 0.6 * xgb_pred + 0.4 * rnn_pred
     return avg_return
 
 
