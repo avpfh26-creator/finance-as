@@ -3,6 +3,8 @@
 
 # Core Framework
 streamlit>=1.28.0
+torch
+tf-keras
 
 # Data Sources
 yfinance>=0.2.28
